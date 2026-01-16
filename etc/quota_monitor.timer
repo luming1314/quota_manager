@@ -1,0 +1,15 @@
+[Unit]
+Description=Run Quota Monitor Every Minute (Testing Mode)
+Requires=quota_monitor.service
+
+[Timer]
+# 测试模式：每分钟执行一次
+# OnCalendar=*:0/1
+# 生产模式：每小时执行一次（取消注释下面这行，注释上面这行）
+OnCalendar=hourly
+OnBootSec=2min
+AccuracySec=1s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

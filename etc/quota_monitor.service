@@ -1,0 +1,15 @@
+[Unit]
+Description=Quota Monitor Service
+Documentation=man:quota_monitor.sh(8)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/quota_monitor.sh
+StandardOutput=append:/var/log/quota.log
+StandardError=append:/var/log/quota.log
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

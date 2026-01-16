@@ -5,6 +5,8 @@
 set -e
 
 BASE_DIR="/opt/quota_manager"
+# 处理 Windows 换行符带来的路径问题
+BASE_DIR=$(echo "$BASE_DIR" | tr -d '\r')
 BIN_DIR="$BASE_DIR/bin"
 ETC_DIR="$BASE_DIR/etc"
 
@@ -43,27 +45,33 @@ if [ ! -f /etc/user_quota.conf ]; then
     sudo chmod 644 /etc/user_quota.conf
     echo "✅ 配置文件已创建：/etc/user_quota.conf，请按需编辑"
 else
-    sudo chmod 644 /etc/user_quota.conf
-    echo "ℹ️ 配置文件 /etc/user_quota.conf 已存在，跳过创建"
+    # 检查内容是否一致
+    if ! cmp -s "$ETC_DIR/user_quota.conf" /etc/user_quota.conf; then
+        echo "⚠️  注意：检测到您的源配置文件与系统 /etc/user_quota.conf 不一致！"
+        echo "   install.sh 默认不会覆盖现有的配置文件。"
+        echo "   👉 如果需要应用新的配额规则，请手动执行："
+        echo "   sudo cp \"$ETC_DIR/user_quota.conf\" /etc/user_quota.conf"
+    else
+        echo "ℹ️ 配置文件 /etc/user_quota.conf 已存在且内容一致"
+    fi
+     sudo chmod 644 /etc/user_quota.conf
 fi
 
-# 6. 创建 cron wrapper
-WRAPPER="$BASE_DIR/bin/quota_monitor_wrapper.sh"
-cat > /tmp/quota_monitor_wrapper.sh << EOF
-#!/bin/bash
-cd "$BASE_DIR" || exit 1
-exec ./bin/quota_monitor.sh
-EOF
-sudo mv /tmp/quota_monitor_wrapper.sh "$WRAPPER"
-sudo chmod +x "$WRAPPER"
+# 6. 安装 systemd timer（替代 cron）
+echo "⏳ 安装 Systemd Timer 定时任务..."
+sudo cp "$ETC_DIR/quota_monitor.service" /etc/systemd/system/
+sudo cp "$ETC_DIR/quota_monitor.timer" /etc/systemd/system/
+sudo chmod 644 /etc/systemd/system/quota_monitor.service
+sudo chmod 644 /etc/systemd/system/quota_monitor.timer
 
-# 7. 设置定时任务
-# 正常模式（每小时）：
-CRON_JOB="0 * * * * $WRAPPER >> /var/log/quota.log 2>&1"
-# 测试模式（每分钟）：
-# CRON_JOB="* * * * * $WRAPPER >> /var/log/quota.log 2>&1"
-(sudo crontab -l 2>/dev/null | grep -v quota_monitor) | sudo crontab -
-echo "$CRON_JOB" | sudo crontab -
+# 重新加载 systemd 并启用 timer
+sudo systemctl daemon-reload
+sudo systemctl enable quota_monitor.timer
+sudo systemctl restart quota_monitor.timer
+
+echo "✅ Systemd Timer 已安装并启动"
+echo "   查看状态: sudo systemctl status quota_monitor.timer"
+echo "   查看日志: sudo journalctl -u quota_monitor.service -f"
 
 echo ""
 echo "✅ 安装成功！"

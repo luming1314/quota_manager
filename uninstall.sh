@@ -6,9 +6,13 @@ set -e
 
 echo "🗑️  正在卸载配额管理系统..."
 
-# 移除 cron 任务
-echo "⏳ 正在移除定时任务..."
-(sudo crontab -l 2>/dev/null | grep -v quota_monitor) | sudo crontab -
+# 移除定时任务（systemd timer）
+echo "🗑️  移除定时任务..."
+sudo systemctl stop quota_monitor.timer 2>/dev/null || true
+sudo systemctl disable quota_monitor.timer 2>/dev/null || true
+sudo rm -f /etc/systemd/system/quota_monitor.service
+sudo rm -f /etc/systemd/system/quota_monitor.timer
+sudo systemctl daemon-reload
 echo "✅ 定时任务已移除"
 
 # 停止并移除服务

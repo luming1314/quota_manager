@@ -1,128 +1,454 @@
-# 课题组服务器磁盘监控管理系统 (Quota Manager)
+# 存储配额管理系统 (Quota Manager)
 
-本系统用于自动监控服务器用户的磁盘用量，并在用户超额使用时执行"软限制"和"硬锁定"策略。
+Linux 服务器多目录用户存储配额监控、警告与自动锁定系统。
 
-## 📖 项目简介
+## 功能特性
 
-系统旨在解决公共服务器磁盘空间被滥用的问题。通过定时任务（默认每小时）扫描用户目录，执行以下策略：
-1.  **软限制 (Soft Quota)**: 当用户磁盘用量超过设定限额时，记录超限起始时间，并写入日志。系统会自动向在线用户终端广播警告信息。
-2.  **宽限期 (Grace Period)**: 用户在首次超限后有 **7天** 的宽限期进行清理。
-3.  **硬锁定 (Hard Lock)**: 如果连续超限超过7天，系统将锁定用户目录（移除写权限，修改所有者），直到管理员介入或用户清理后自动恢复。
+- ✅ **多目录支持**：支持监控多个基础目录（如 `/amax/data`, `/home` 等）下的用户配额
+- ✅ **自动监控**：基于 systemd timer 的定时任务，每小时自动检查用户存储使用情况
+- ✅ **实时警告**：后台守护进程实时向超限用户的终端发送警告
+- ✅ **登录提示**：用户登录时自动显示配额超限警告（支持 SSH 和 VS Code 远程终端）
+- ✅ **宽限期机制**：超限后提供 7 天宽限期，超期自动锁定目录
+- ✅ **自动恢复**：用户清理数据后自动解除锁定
+- ✅ **管理工具**：提供手动解锁脚本，管理员可快速处理特殊情况
 
-## 📂 目录结构
+## 系统要求
 
-```text
-quota_manager/
-├── bin/
-│   ├── quota_monitor.sh         # [核心] 监控主程序，执行检查、锁定及通知逻辑
-│   ├── quota_banner.sh          # 登录提示脚本，显示当前配额状态及彩显警告
-│   └── unlock_user.sh           # 管理员手动解锁用户的辅助脚本
-├── etc/
-│   └── user_quota.conf          # 配置文件模板
-├── install.sh                   # 一键安装脚本
-├── uninstall.sh                 # 卸载脚本
-└── README.md                    # 本说明文件
+- **操作系统**：Linux（推荐 Ubuntu 20.04+、CentOS 7+）
+- **权限**：需要 root 权限进行安装和配置
+- **依赖工具**：`bash`, `systemd`, `du`, `awk`, `grep`
+
+## 快速开始
+
+### 1. 安装
+
+```bash
+# 进入项目目录
+cd /opt/quota_manager
+
+# 设置脚本可执行权限
+sudo chmod +x /opt/quota_manager/*.sh
+sudo chmod +x /opt/quota_manager/bin/*.sh
+
+# 运行安装脚本
+sudo ./install.sh
 ```
 
-## ⚠️ 关键配置说明
+安装脚本会自动完成以下操作：
 
-以下路径在脚本中存在硬编码引用。其中 **软件安装路径** 建议保持默认，而 **用户数据根目录** 通常需要根据服务器实际情况进行修改。
+- 创建系统目录和日志文件
+- 复制脚本到系统路径
+- 安装并启用 systemd 服务和定时器
+- 配置登录提示和 VS Code 终端支持
+- 生成默认配置文件（如不存在）
 
-如需修改，请务必仔细同步更新以下涉及的脚本：
+### 2. 配置用户配额
 
-*   **软件安装路径 (`BASE_DIR`)**
-    *   **默认值**: `/opt/quota_manager`
-    *   **涉及脚本**: `install.sh`
-    *   **说明**: 安装脚本默认将程序安装在此位置。如果修改此路径，需同步更新 `install.sh` 中定义的 `BASE_DIR` 变量。
+编辑配置文件 `/etc/user_quota.conf`：
 
-*   **用户数据根目录 (`USER_QUOTA_BASE`)**
-    *   **默认值**: `/amax/data`
-    *   **涉及脚本**: `bin/quota_banner.sh`, `bin/quota_monitor.sh`, `bin/unlock_user.sh`
-    *   **说明**: 系统仅监控此目录下的子文件夹大小。如果您的用户数据存储在其他挂载点（如 `/home`），请务必修改以上三个脚本中的 `USER_QUOTA_BASE` 变量。
+```bash
+sudo nano /etc/user_quota.conf
+```
 
-## 🚀 安装说明
+**配置格式**：
+```
+username  directory  limit(GB)
+```
 
-1.  **赋予脚本执行权限**:
-    ```bash
-    sudo chmod +x /opt/quota_manager/*.sh
-    sudo chmod +x /opt/quota_manager/bin/*.sh
-    ```
+**示例**：
+```conf
+# 用户 alice 在 /amax/data 下限额 100GB
+alice /amax/data 100
 
-2.  **运行安装脚本**:
-    ```bash
-    sudo ./install.sh
-    ```
-    脚本会自动：
-    *   创建必要的系统目录 (`/var/lib/quota_system`, `/var/log/quota.log`)。
-    *   将核心脚本 (`quota_monitor.sh`, `unlock_user.sh`) 复制到 `/usr/local/bin`。
-    *   设置 `/etc/profile.d/` 登录提示，并配置 VS Code 终端支持。
-    *   配置 Crontab 定时任务（每小时执行一次）。
+# 同一用户在 /home 下限额 20GB
+alice /home 20
 
-3.  **配置用户限额**:
-    安装完成后，编辑配置文件 `/etc/user_quota.conf`：
-    ```bash
-    sudo vim /etc/user_quota.conf
-    ```
+# 用户 bob 在 /amax/data 下限额 500GB
+bob /amax/data 500
+```
 
-## ⚙️ 配置格式
+**配置说明**：
+- 每行定义一条配额规则
+- 同一用户可针对不同目录设置不同配额
+- 系统会监控 `directory/username` 目录的大小
+- 配额单位为 GB（支持小数，如 `0.001` 用于测试）
 
-配置文件 `/etc/user_quota.conf` 使用 `用户名=限额(GB)` 的格式。
+### 3. 验证安装
+
+```bash
+# 检查定时器状态
+sudo systemctl status quota_monitor.timer
+
+# 检查通知服务状态
+sudo systemctl status quota_notifier.service
+
+# 查看日志
+sudo journalctl -u quota_monitor.service -f
+```
+
+### 4. 手动触发检查（可选）
+
+```bash
+sudo /usr/local/bin/quota_monitor.sh
+```
+
+## 目录结构
+
+```
+/opt/quota_manager/          # 项目安装目录
+├── bin/                     # 可执行脚本
+│   ├── quota_monitor.sh     # 配额监控主程序
+│   ├── quota_notifier.sh    # 实时通知守护进程
+│   ├── quota_banner.sh      # 登录警告横幅
+│   └── unlock_user.sh       # 手动解锁工具
+├── etc/                     # 配置文件和服务定义
+│   ├── user_quota.conf      # 用户配额配置模板
+│   ├── quota_monitor.service # systemd 服务单元
+│   ├── quota_monitor.timer   # systemd 定时器
+│   └── quota_notifier.service # 通知守护进程服务
+├── install.sh               # 安装脚本
+└── uninstall.sh             # 卸载脚本
+
+/etc/user_quota.conf         # 系统配置文件（安装后生成）
+/var/lib/quota_system/       # 运行时状态目录
+/var/log/quota.log           # 系统日志
+/usr/local/bin/              # 系统集成的可执行脚本
+/etc/profile.d/quota_banner.sh  # 登录提示脚本
+```
+
+## 核心组件说明
+
+### quota_monitor.sh - 配额监控主程序
+
+- **功能**：扫描所有用户配额，检测超限情况，管理锁定状态
+- **运行频率**：每小时（由 systemd timer 控制）
+- **状态管理**：
+  - 首次超限：记录超限时间到状态文件
+  - 超限 7 天：自动锁定目录（移除写权限）
+  - 用量恢复正常：自动解锁并清理状态
+
+**重要参数**：
+- `LOCK_DAYS=7`：宽限期天数（可在脚本中修改）
+- `CONFIG="/etc/user_quota.conf"`：配置文件路径
+- `STATE_DIR="/var/lib/quota_system"`：状态文件存储目录
+
+### quota_notifier.sh - 实时通知守护进程
+
+- **功能**：向超限用户的活动终端发送实时警告
+- **运行方式**：作为 systemd 服务常驻后台
+- **警告间隔**：每 10 分钟（可通过 `WARN_INTERVAL` 修改）
+- **检测范围**：自动发现所有 SSH、pts 终端
+
+### quota_banner.sh - 登录横幅
+
+- **功能**：在用户登录时显示配额超限警告
+- **触发场景**：
+  - SSH 登录
+  - VS Code 远程终端启动
+  - 新建 bash 会话
+- **显示内容**：
+  - 超限目录位置
+  - 配额限制
+  - 剩余宽限天数或锁定状态
+
+### unlock_user.sh - 管理员解锁工具
+
+- **功能**：手动解除用户目录锁定并重置配额状态
+- **用法**：
+  ```bash
+  sudo /usr/local/bin/unlock_user.sh <username>
+  ```
+- **操作**：
+  - 恢复目录所有权和写权限
+  - 清除所有相关状态文件（`.state`, `.locked`, `.warn_time`）
+
+## 使用场景
+
+### 场景 1：用户首次超限
+
+1. **系统检测**：`quota_monitor.sh` 发现用户目录超限
+2. **状态记录**：创建状态文件 `/var/lib/quota_system/username_path.state`
+3. **用户提示**：
+   - 下次登录时显示红色警告横幅
+   - 后台服务每 10 分钟向终端发送警告
+4. **倒计时**：警告中显示剩余宽限天数
+
+### 场景 2：宽限期内用户清理数据
+
+1. **用户操作**：删除文件使用量降至限额以下
+2. **自动解锁**：下次检查时自动恢复权限并清除状态
+3. **日志记录**：记录恢复操作到 `/var/log/quota.log`
+
+### 场景 3：超期自动锁定
+
+1. **触发条件**：超限超过 7 天
+2. **锁定操作**：
+   - 目录所有权改为 `root:用户组`
+   - 移除所有用户的写权限
+   - 创建 `.locked` 标记文件
+3. **用户体验**：
+   - 无法创建或修改文件
+   - 登录时显示"目录已锁定"错误提示
+
+### 场景 4：管理员介入
+
+```bash
+# 管理员决定提前解锁用户
+sudo unlock_user.sh alice
+
+# 输出示例：
+# 📂 Processing Directory: /amax/data/alice
+#    Restoring permissions...
+#    ✅ Permissions restored.
+#    Clearing state files...
+#    ✅ State reset.
+# 🎉 User alice has been unlocked/reset.
+```
+
+## 配置调整
+
+### 修改宽限期
+
+编辑 `/usr/local/bin/quota_monitor.sh` 和 `/opt/quota_manager/bin/quota_banner.sh`：
+
+```bash
+LOCK_DAYS=7  # 改为所需天数（如 14）
+```
+
+### 修改检查频率
+
+编辑 `/etc/systemd/system/quota_monitor.timer`：
 
 ```ini
-# 格式: username=限额(GB)
-# 注意: 用户名必须是系统中存在的用户
+# 每小时（默认）
+OnCalendar=hourly
 
-alice=10
-bob=20
+# 改为每 30 分钟
+OnCalendar=*:0/30
 
-# 注释掉的行将被忽略
-# test_user=50
+# 改为每天凌晨 2 点
+OnCalendar=*-*-* 02:00:00
 ```
 
-## 🛠 工作原理与运维
-
-### 监控逻辑
-- **正常状态**: 目录权限正常，用户可读写。
-- **首次超限**: 系统记录当前时间戳到 `/var/lib/quota_system/<user>.state`。
-- **持续超限**: 
-    - 每次检查都会确认是否仍超限。
-    - **在线通知**: 如果用户在线，每隔 10 分钟会向其所有终端发送全屏警告（支持 VS Code 终端）。
-- **恢复正常**: 一旦用量低于限额，系统自动删除 `.state` 文件，如果目录曾被锁定，会自动解锁（恢复写权限，归还所有者）。
-- **锁定触发**: 若 `(当前时间 - 首次超限时间) > 7天`，系统将：
-    1.  执行 `chmod a-w` (移除全员写权限)。
-    2.  执行 `chown root:gid` (改变所有者防止用户修改权限)。
-    3.  创建 `.locked` 标记文件。
-
-### 日志查看
-所有操作日志记录在 `/var/log/quota.log`：
+应用更改：
 ```bash
-tail -f /var/log/quota.log
+sudo systemctl daemon-reload
+sudo systemctl restart quota_monitor.timer
 ```
 
-### 手动触发检查
-安装后，cron 任务实际上调用的是 `/opt/quota_manager/bin/quota_monitor_wrapper.sh`。
-如果想立即手动执行检查，可以直接运行：
-```bash
-sudo quota_monitor.sh
-```
-或者运行安装目录下的 wrapper：
-```bash
-sudo /opt/quota_manager/bin/quota_monitor_wrapper.sh
-```
+### 修改实时警告间隔
 
-### 解锁用户
-通常用户清理文件后，下次 Cron 任务执行时会自动解锁。
-如果需要紧急解锁或重置宽限期，请使用提供的辅助脚本：
+编辑 `/usr/local/bin/quota_notifier.sh`：
 
 ```bash
-sudo unlock_user.sh <username>
+WARN_INTERVAL=600  # 改为所需秒数（如 300 = 5分钟）
 ```
-此命令会：
-1. 立即恢复目录权限和所有者。
-2. 清除锁定的状态文件（重置7天倒计时）。
 
-### 卸载系统
-如果需要移除本系统：
+重启服务：
 ```bash
+sudo systemctl restart quota_notifier.service
+```
+
+## 日志与监控
+
+### 查看系统日志
+
+```bash
+# 实时查看配额检查日志
+sudo journalctl -u quota_monitor.service -f
+
+# 查看最近 100 行
+sudo journalctl -u quota_monitor.service -n 100
+
+# 查看通知服务日志
+sudo journalctl -u quota_notifier.service -f
+```
+
+### 检查用户状态
+
+```bash
+# 查看所有状态文件
+ls -lh /var/lib/quota_system/
+
+# 查看特定用户状态
+cat /var/lib/quota_system/alice_amax_data.state
+```
+
+**状态文件格式**：
+```
+over_quota_since=1705123456
+QUOTA_USER="alice"
+QUOTA_BASE="/amax/data"
+QUOTA_LIMIT="100"
+```
+
+### 手动检查用户使用量
+
+```bash
+# 查看用户目录大小
+du -sh /amax/data/alice
+
+# 查看详细使用情况
+du -h --max-depth=1 /amax/data/alice
+```
+
+## 卸载
+
+```bash
+cd /opt/quota_manager
 sudo ./uninstall.sh
 ```
+
+卸载脚本会：
+- 停止并移除所有 systemd 服务和定时器
+- 删除 `/usr/local/bin/` 下的脚本
+- 移除登录提示和 VS Code 配置
+- **保留**以下数据（需手动删除）：
+  - `/etc/user_quota.conf`
+  - `/var/lib/quota_system/`
+  - `/var/log/quota.log`
+
+完全清除（可选）：
+```bash
+sudo rm -f /etc/user_quota.conf
+sudo rm -rf /var/lib/quota_system
+sudo rm -f /var/log/quota.log
+```
+
+## 故障排除
+
+### 警告未显示
+
+1. 检查状态文件是否存在：
+   ```bash
+   ls /var/lib/quota_system/
+   ```
+
+2. 手动触发检查：
+   ```bash
+   sudo /usr/local/bin/quota_monitor.sh
+   ```
+
+3. 测试登录横幅：
+   ```bash
+   bash /opt/quota_manager/bin/quota_banner.sh
+   ```
+
+### VS Code 终端不显示警告
+
+检查 `/etc/bash.bashrc` 或 `/etc/bashrc` 是否包含：
+```bash
+grep -A5 "BEGIN QUOTA MANAGER" /etc/bash.bashrc
+```
+
+如未找到，重新运行安装脚本。
+
+### 定时任务未执行
+
+```bash
+# 检查 timer 状态
+sudo systemctl status quota_monitor.timer
+
+# 查看下次执行时间
+sudo systemctl list-timers quota_monitor.timer
+
+# 手动启动
+sudo systemctl start quota_monitor.service
+```
+
+### 权限问题
+
+所有核心脚本必须以 root 权限运行：
+```bash
+# 检查脚本权限
+ls -l /usr/local/bin/quota_*.sh
+
+# 应显示：
+# -rwxr-xr-x 1 root root ... quota_monitor.sh
+```
+
+## 安全说明
+
+- **权限管理**：仅 root 可修改配额配置和执行锁定操作
+- **状态隔离**：每个用户的状态文件独立存储，避免互相影响
+- **日志审计**：所有关键操作记录到 `/var/log/quota.log`
+- **路径安全**：所有路径处理已转义，防止注入攻击
+
+## 技术细节
+
+### 多目录支持机制
+
+- **状态文件命名**：`username_escaped_path.state`
+  - 示例：`alice_amax_data.state`（对应 `/amax/data/alice`）
+  - 示例：`alice_home.state`（对应 `/home/alice`）
+
+- **配额计算**：使用 `du -s --block-size=1K` 获取精确使用量
+
+- **锁定机制**：修改目录所有权和权限而非使用 `chattr`，兼容性更好
+
+### systemd 集成
+
+- **quota_monitor.timer**：定时触发配额检查
+  - `OnCalendar=hourly`：每小时执行
+  - `Persistent=true`：错过时间后会立即执行
+  - `OnBootSec=2min`：启动后 2 分钟首次运行
+
+- **quota_notifier.service**：常驻后台服务
+  - `Restart=always`：崩溃后自动重启
+  - `RestartSec=10`：重启等待 10 秒
+
+## 开发与贡献
+
+### 测试模式
+
+**快速测试（每分钟检查一次）**：
+
+编辑 `/etc/systemd/system/quota_monitor.timer`：
+```ini
+OnCalendar=*:0/1  # 取消注释此行
+# OnCalendar=hourly  # 注释此行
+```
+
+编辑 `/usr/local/bin/quota_monitor.sh`：
+```bash
+LOCK_DAYS=0  # 立即锁定（无宽限期）
+```
+
+编辑 `/usr/local/bin/quota_notifier.sh`：
+```bash
+WARN_INTERVAL=5  # 每 5 秒警告一次
+```
+
+应用更改：
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart quota_monitor.timer
+sudo systemctl restart quota_notifier.service
+```
+
+### 日志调试
+
+启用详细日志：
+```bash
+# 编辑脚本，在开头添加：
+set -x  # 启用命令跟踪
+```
+
+## 版本历史
+
+- **v2.0**（当前）：
+  - 支持多目录配额监控
+  - 改进状态文件命名机制
+  - 添加 VS Code 终端支持
+  - 优化实时通知逻辑
+
+- **v1.0**：
+  - 初始版本，仅支持单一目录 `/amax/data`
+
+## 许可证
+
+MIT License
+
+## 联系方式
+
+如有问题或建议，请联系系统管理员。
