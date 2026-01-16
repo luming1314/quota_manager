@@ -11,9 +11,26 @@ echo "⏳ 正在移除定时任务..."
 (sudo crontab -l 2>/dev/null | grep -v quota_monitor) | sudo crontab -
 echo "✅ 定时任务已移除"
 
+# 停止并移除服务
+echo "🛑 正在停止后台服务..."
+if systemctl list-unit-files | grep -q quota_notifier.service; then
+    sudo systemctl stop quota_notifier.service || true
+    sudo systemctl disable quota_notifier.service || true
+    sudo rm -f /etc/systemd/system/quota_notifier.service
+    sudo systemctl daemon-reload
+    echo "✅ 服务已停止并移除"
+else
+    echo "ℹ️ 服务未安装，跳过"
+fi
+
 # 移除系统集成文件
 echo "🧹 正在移除系统文件..."
 # 主程序
+if [ -f /usr/local/bin/quota_notifier.sh ]; then
+    sudo rm -f /usr/local/bin/quota_notifier.sh
+    echo "   - 已删除: /usr/local/bin/quota_notifier.sh"
+fi
+
 if [ -f /usr/local/bin/quota_monitor.sh ]; then
     sudo rm -f /usr/local/bin/quota_monitor.sh
     echo "   - 已删除: /usr/local/bin/quota_monitor.sh"

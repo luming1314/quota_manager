@@ -9,7 +9,7 @@ CONFIG="/etc/user_quota.conf"
 STATE_DIR="/var/lib/quota_system"
 LOG_FILE="/var/log/quota.log"
 LOCK_DAYS=7 # 宽限期（天）。测试模式设为0（立即锁定），生产环境建议设为7。
-WARN_INTERVAL=3600 # 警告间隔（秒），防止刷屏。1小时通知一次
+
 
 mkdir -p "$STATE_DIR"
 chmod 755 "$STATE_DIR"
@@ -74,45 +74,10 @@ while IFS='=' read -r user limit_gb; do
                 echo "[$(date)] $user 已超 $LOCK_DAYS 天，目录已锁定" >> "$LOG_FILE"
             fi
             
-            # --- 新增：通知在线用户 ---
-            warn_file="$STATE_DIR/$user.warn_time"
-            last_warn=0
-            if [[ -f "$warn_file" ]]; then
-                last_warn=$(cat "$warn_file")
-            fi
-            
-            # 确保 now 变量是最新的（虽然上面循环用了 now，但这里为了保险也可以沿用 or update）
-            # 注意：上面的 now 是第一阶段循环计算的。第二阶段循环没有更新 now。
-            # 建议给 now 赋新值或者认为脚本执行极快（通常是）在此处复用即可。
-            # 这里如果不更新，now 可能有点旧，但对于 3600秒间隔无所谓。
-            # 为了严谨，使用当前时间判断
-            current_ts=$(date +%s)
-            
-            if (( current_ts - last_warn >= WARN_INTERVAL )); then
-                # 寻找该用户的所有伪终端 (pts)
-                # who 输出示例: user pts/0 2024-01-01 ...
-                for tty in $(who | awk -v u="$user" '$1 == u {print $2}'); do
-                    if [[ -c "/dev/$tty" ]]; then
-                        # 启动子进程 调用 quota_banner.sh 并输出到目标终端
-                        (
-                            export USER="$user"
-                            export QUOTA_BANNER_SHOWN="" # 强制显示，忽略已显示标记
-                            # 定位脚本目录 (假设 banner 和 monitor 在同一目录)
-                            BIN_DIR=$(dirname "$0")
-                            if [[ ! -f "$BIN_DIR/quota_banner.sh" ]]; then
-                                # 回退到绝对路径 (根据原有注释)
-                                BIN_DIR="/opt/quota_manager/bin"
-                            fi
-                            
-                            if [[ -f "$BIN_DIR/quota_banner.sh" ]]; then
-                                /bin/bash "$BIN_DIR/quota_banner.sh" > "/dev/$tty" 2>&1
-                            fi
-                        )
-                    fi
-                done
-                # 更新警告时间
-                echo "$current_ts" > "$warn_file"
-            fi
+            # --- 通知逻辑已移至 quota_notifier.sh ---
+        fi
+    fi
+done < "$CONFIG"
         fi
     fi
 done < "$CONFIG"

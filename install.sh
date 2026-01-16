@@ -24,6 +24,14 @@ sudo cp "$BIN_DIR/quota_monitor.sh" /usr/local/bin/
 sudo chmod +x /usr/local/bin/quota_monitor.sh
 sudo cp "$BIN_DIR/unlock_user.sh" /usr/local/bin/
 sudo chmod +x /usr/local/bin/unlock_user.sh
+sudo cp "$BIN_DIR/quota_notifier.sh" /usr/local/bin/
+sudo chmod +x /usr/local/bin/quota_notifier.sh
+
+# 3.1 安装系统服务
+sudo cp "$ETC_DIR/quota_notifier.service" /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable quota_notifier.service
+sudo systemctl restart quota_notifier.service
 
 # 4. 安装登录提示（符号链接便于更新）
 sudo ln -sf "$BASE_DIR/bin/quota_banner.sh" /etc/profile.d/quota_banner.sh

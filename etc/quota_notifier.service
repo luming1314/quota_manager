@@ -1,0 +1,12 @@
+[Unit]
+Description=Quota Manager Notification Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/quota_manager/bin/quota_notifier.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
