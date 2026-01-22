@@ -95,6 +95,9 @@ if [[ -z "${_QUOTA_BANNER_HAS_RUN_IN_THIS_SHELL:-}" ]]; then
                 echo ""
                 echo "   您的目录将于 【$lock_date】 ($days_left 天后) 被锁定，届时将无法写入！"
                 echo "   请立即清理文件，以免影响使用。"
+                echo ""
+                echo "   📝 温馨提示："
+                echo "   清理文件至限额以下后，请忽略此提示！系统会在24小时内自动检查并更新配额状态。"
                 echo -e "\033[0m"
             else
                 echo -e "\033[41;37m                                             \033[0m"
